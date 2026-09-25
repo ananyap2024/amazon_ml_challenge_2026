@@ -1,2 +1,20 @@
-dataset/
+# macOS files
 .DS_Store
+
+# Amazon ML Challenge dataset
+dataset/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Generated outputs
+output/
+
+# Local files
+.env
