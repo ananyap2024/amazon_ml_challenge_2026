@@ -10,22 +10,64 @@ import pandas as pd
 # CONFIGURATION
 # ============================================================
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
 
-DATA_DIR = os.path.join(BASE_DIR, "dataset")
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+DATA_DIR = os.path.join(
+    BASE_DIR,
+    "dataset"
+)
 
-S1_PATH = os.path.join(DATA_DIR, "test", "test_source1.tsv")
-S2_PATH = os.path.join(DATA_DIR, "test", "test_source2.tsv")
-S3_PATH = os.path.join(DATA_DIR, "test", "test_source3.tsv")
+OUTPUT_DIR = os.path.join(
+    BASE_DIR,
+    "output"
+)
 
-# ------------------------------------------------------------
-# PILOT LIMIT
-# ------------------------------------------------------------
+
+# ============================================================
+# TEST DATA PATHS
+# ============================================================
+
+S1_PATH = os.path.join(
+    DATA_DIR,
+    "test",
+    "test_source1.tsv"
+)
+
+S2_PATH = os.path.join(
+    DATA_DIR,
+    "test",
+    "test_source2.tsv"
+)
+
+S3_PATH = os.path.join(
+    DATA_DIR,
+    "test",
+    "test_source3.tsv"
+)
+
+
+# ============================================================
+# S1 LIMIT
+# ============================================================
+# None = FULL TEST DATASET
+#
+# For a smoke test, temporarily use:
+# S1_LIMIT = 50_000
+#
+# For official generation:
+# S1_LIMIT = None
+# ============================================================
+
 S1_LIMIT = 50_000
 
-# ------------------------------------------------------------
+
+# ============================================================
 # MULTI-PASS BLOCKING STRATEGY
+# ============================================================
 #
 # Pass 1:
 #   1 distinctive token
@@ -33,18 +75,33 @@ S1_LIMIT = 50_000
 #
 # Pass 2:
 #   2 distinctive tokens
-#   max token frequency = 7,500
+#   max token frequency = 12,500
 #
-# Exact normalized name matching is also included.
-# ------------------------------------------------------------
+# Exact normalized-name blocking is also included.
+#
+# Candidates from all passes are UNIONED.
+# ============================================================
 
 PASS1_MAX_TOKENS = 1
+
 PASS1_MAX_TOKEN_FREQUENCY = 20_000
 
+
 PASS2_MAX_TOKENS = 2
-PASS2_MAX_TOKEN_FREQUENCY = 7_500
+
+PASS2_MAX_TOKEN_FREQUENCY = 12_500
+
+
+# ============================================================
+# CHUNK SIZE
+# ============================================================
 
 S1_CHUNK_SIZE = 10_000
+
+
+# ============================================================
+# OUTPUT PATHS
+# ============================================================
 
 INTERNAL_OUTPUT = os.path.join(
     OUTPUT_DIR,
@@ -64,6 +121,12 @@ OFFICIAL_OUTPUT = os.path.join(
 def normalize_text(value):
     """
     Normalize text for blocking.
+
+    Steps:
+    1. Handle missing values.
+    2. Convert to lowercase.
+    3. Remove non-alphanumeric characters.
+    4. Collapse repeated whitespace.
     """
 
     if pd.isna(value):
@@ -71,12 +134,24 @@ def normalize_text(value):
 
     value = str(value).lower().strip()
 
-    value = re.sub(r"[^a-z0-9\s]", " ", value)
+    value = re.sub(
+        r"[^a-z0-9\s]",
+        " ",
+        value
+    )
 
-    value = re.sub(r"\s+", " ", value)
+    value = re.sub(
+        r"\s+",
+        " ",
+        value
+    )
 
     return value.strip()
 
+
+# ============================================================
+# TOKENIZATION
+# ============================================================
 
 def tokenize(value):
     """
@@ -94,13 +169,29 @@ def tokenize(value):
 # ============================================================
 
 def load_source(path, source_name):
-    print(f"\nLoading {source_name}...")
-    print(f"Path: {path}")
 
-    df = pd.read_csv(path, sep="\t")
+    print(
+        f"\nLoading {source_name}..."
+    )
 
-    print(f"{source_name} rows: {len(df):,}")
-    print(f"{source_name} columns: {list(df.columns)}")
+    print(
+        f"Path: {path}"
+    )
+
+    df = pd.read_csv(
+        path,
+        sep="\t"
+    )
+
+    print(
+        f"{source_name} rows: "
+        f"{len(df):,}"
+    )
+
+    print(
+        f"{source_name} columns: "
+        f"{list(df.columns)}"
+    )
 
     return df
 
@@ -120,16 +211,20 @@ def find_column(df, candidates):
     }
 
     for candidate in candidates:
+
         key = candidate.lower()
 
         if key in normalized:
             return normalized[key]
 
     # Partial matching fallback
+
     for col in df.columns:
+
         col_lower = str(col).lower()
 
         for candidate in candidates:
+
             if candidate.lower() in col_lower:
                 return col
 
@@ -162,19 +257,30 @@ def prepare_source(df, source_name):
     )
 
     if id_col is None:
+
         raise ValueError(
-            f"Could not identify ID column in {source_name}"
+            f"Could not identify ID column "
+            f"in {source_name}"
         )
 
     if name_col is None:
+
         raise ValueError(
-            f"Could not identify name column in {source_name}"
+            f"Could not identify name column "
+            f"in {source_name}"
         )
 
     result = pd.DataFrame()
 
-    result["entity_id"] = df[id_col].astype(str)
-    result["name"] = df[name_col].fillna("").astype(str)
+    result["entity_id"] = (
+        df[id_col].astype(str)
+    )
+
+    result["name"] = (
+        df[name_col]
+        .fillna("")
+        .astype(str)
+    )
 
     result["normalized_name"] = (
         result["name"]
@@ -208,6 +314,7 @@ def build_token_frequency(source_df):
         unique_tokens = set(tokens)
 
         for token in unique_tokens:
+
             token_frequency[token] += 1
 
     return token_frequency
@@ -234,15 +341,25 @@ def select_tokens(
 
     for token in set(tokens):
 
-        frequency = token_frequency.get(token, 0)
+        frequency = token_frequency.get(
+            token,
+            0
+        )
 
         if frequency <= max_frequency:
+
             candidates.append(
-                (frequency, token)
+                (
+                    frequency,
+                    token
+                )
             )
 
     candidates.sort(
-        key=lambda x: (x[0], x[1])
+        key=lambda x: (
+            x[0],
+            x[1]
+        )
     )
 
     return [
@@ -259,12 +376,19 @@ def build_exact_name_index(source_df):
 
     index = defaultdict(set)
 
-    for row in source_df.itertuples(index=False):
+    for row in source_df.itertuples(
+        index=False
+    ):
 
-        normalized_name = row.normalized_name
+        normalized_name = (
+            row.normalized_name
+        )
 
         if normalized_name:
-            index[normalized_name].add(
+
+            index[
+                normalized_name
+            ].add(
                 row.entity_id
             )
 
@@ -285,13 +409,15 @@ def build_token_index(
 
         token -> set(entity_ids)
 
-    Only tokens whose frequency is <= max_frequency
-    are indexed.
+    Only tokens whose frequency is <=
+    max_frequency are indexed.
     """
 
     token_index = defaultdict(set)
 
-    for row in source_df.itertuples(index=False):
+    for row in source_df.itertuples(
+        index=False
+    ):
 
         for token in set(row.tokens):
 
@@ -318,8 +444,6 @@ def generate_for_s1(
     exact_index,
     token_index_pass1,
     token_index_pass2,
-    s2_ids,
-    s3_ids,
     token_frequency,
     s2_entity_ids,
     s3_entity_ids
@@ -328,25 +452,32 @@ def generate_for_s1(
     Generate candidates using:
 
     1. Exact normalized-name blocking
+
     2. Pass 1:
-         1 distinctive token
-         max frequency 20K
+       1 distinctive token
+       max frequency = 20,000
+
     3. Pass 2:
-         2 distinctive tokens
-         max frequency 7.5K
+       2 distinctive tokens
+       max frequency = 12,500
 
     Candidates from all passes are UNIONED.
     """
 
     candidates_s2 = set()
+
     candidates_s3 = set()
 
-    normalized_name = s1_row.normalized_name
+    normalized_name = (
+        s1_row.normalized_name
+    )
+
     tokens = s1_row.tokens
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # EXACT NAME PASS
-    # --------------------------------------------------------
+    # ========================================================
 
     if normalized_name:
 
@@ -358,17 +489,24 @@ def generate_for_s1(
         for entity_id in exact_matches:
 
             if entity_id in s2_entity_ids:
-                candidates_s2.add(entity_id)
+
+                candidates_s2.add(
+                    entity_id
+                )
 
             elif entity_id in s3_entity_ids:
-                candidates_s3.add(entity_id)
 
-    # --------------------------------------------------------
+                candidates_s3.add(
+                    entity_id
+                )
+
+
+    # ========================================================
     # PASS 1
-    # --------------------------------------------------------
+    # ========================================================
     # 1 distinctive token
     # max frequency = 20,000
-    # --------------------------------------------------------
+    # ========================================================
 
     pass1_tokens = select_tokens(
         tokens=tokens,
@@ -379,25 +517,34 @@ def generate_for_s1(
 
     for token in pass1_tokens:
 
-        matching_ids = token_index_pass1.get(
-            token,
-            set()
+        matching_ids = (
+            token_index_pass1.get(
+                token,
+                set()
+            )
         )
 
         for entity_id in matching_ids:
 
             if entity_id in s2_entity_ids:
-                candidates_s2.add(entity_id)
+
+                candidates_s2.add(
+                    entity_id
+                )
 
             elif entity_id in s3_entity_ids:
-                candidates_s3.add(entity_id)
 
-    # --------------------------------------------------------
+                candidates_s3.add(
+                    entity_id
+                )
+
+
+    # ========================================================
     # PASS 2
-    # --------------------------------------------------------
+    # ========================================================
     # 2 distinctive tokens
-    # max frequency = 7,500
-    # --------------------------------------------------------
+    # max frequency = 12,500
+    # ========================================================
 
     pass2_tokens = select_tokens(
         tokens=tokens,
@@ -408,20 +555,31 @@ def generate_for_s1(
 
     for token in pass2_tokens:
 
-        matching_ids = token_index_pass2.get(
-            token,
-            set()
+        matching_ids = (
+            token_index_pass2.get(
+                token,
+                set()
+            )
         )
 
         for entity_id in matching_ids:
 
             if entity_id in s2_entity_ids:
-                candidates_s2.add(entity_id)
+
+                candidates_s2.add(
+                    entity_id
+                )
 
             elif entity_id in s3_entity_ids:
-                candidates_s3.add(entity_id)
 
-    return candidates_s2, candidates_s3
+                candidates_s3.add(
+                    entity_id
+                )
+
+    return (
+        candidates_s2,
+        candidates_s3
+    )
 
 
 # ============================================================
@@ -430,43 +588,78 @@ def generate_for_s1(
 
 def main():
 
-    global TOKEN_FREQ_COMBINED
-
     start_time = time.time()
 
     print("=" * 70)
-    print("MULTI-PASS CANDIDATE GENERATION")
+
+    print(
+        "OFFICIAL TEST CANDIDATE GENERATION"
+    )
+
     print("=" * 70)
 
+
+    # ========================================================
+    # CONFIGURATION DISPLAY
+    # ========================================================
+
     print("\nConfiguration:")
+
+    if S1_LIMIT is None:
+
+        s1_limit_display = "ALL"
+
+    else:
+
+        s1_limit_display = (
+            f"{S1_LIMIT:,}"
+        )
+
     print(
-        f"  S1 limit                 : {S1_LIMIT:,}"
+        f"  S1 limit                 : "
+        f"{s1_limit_display}"
     )
+
     print(
-        f"  Pass 1 max tokens        : {PASS1_MAX_TOKENS}"
+        f"  Pass 1 max tokens        : "
+        f"{PASS1_MAX_TOKENS}"
     )
+
     print(
         f"  Pass 1 max frequency     : "
         f"{PASS1_MAX_TOKEN_FREQUENCY:,}"
     )
+
     print(
-        f"  Pass 2 max tokens        : {PASS2_MAX_TOKENS}"
+        f"  Pass 2 max tokens        : "
+        f"{PASS2_MAX_TOKENS}"
     )
+
     print(
         f"  Pass 2 max frequency     : "
         f"{PASS2_MAX_TOKEN_FREQUENCY:,}"
     )
 
-    # --------------------------------------------------------
+    print(
+        f"  S1 chunk size            : "
+        f"{S1_CHUNK_SIZE:,}"
+    )
+
+
+    # ========================================================
     # CREATE OUTPUT DIRECTORY
-    # --------------------------------------------------------
+    # ========================================================
 
     os.makedirs(
         OUTPUT_DIR,
         exist_ok=True
     )
 
-    # Remove previous pilot outputs
+
+    # ========================================================
+    # REMOVE PREVIOUS OUTPUTS
+    # ========================================================
+
     for path in [
         INTERNAL_OUTPUT,
         OFFICIAL_OUTPUT
@@ -475,14 +668,16 @@ def main():
         if os.path.exists(path):
 
             print(
-                f"\nRemoving previous output: {path}"
+                f"\nRemoving previous output: "
+                f"{path}"
             )
 
             os.remove(path)
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # LOAD SOURCES
-    # --------------------------------------------------------
+    # ========================================================
 
     s1_raw = load_source(
         S1_PATH,
@@ -499,22 +694,39 @@ def main():
         "S3"
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # APPLY S1 LIMIT
-    # --------------------------------------------------------
+    # ========================================================
 
-    s1_raw = s1_raw.head(
-        S1_LIMIT
-    ).copy()
+    if S1_LIMIT is not None:
 
-    print(
-        f"\nS1 rows selected for pilot: "
-        f"{len(s1_raw):,}"
-    )
+        s1_raw = (
+            s1_raw
+            .head(S1_LIMIT)
+            .copy()
+        )
 
-    # --------------------------------------------------------
+        print(
+            f"\nS1 rows selected for pilot: "
+            f"{len(s1_raw):,}"
+        )
+
+    else:
+
+        s1_raw = s1_raw.copy()
+
+        print(
+            f"\nFull S1 dataset selected: "
+            f"{len(s1_raw):,} rows"
+        )
+
+
+    # ========================================================
     # PREPARE SOURCES
-    # --------------------------------------------------------
+    # ========================================================
+
+    print("\nPreparing sources...")
 
     s1 = prepare_source(
         s1_raw,
@@ -531,9 +743,12 @@ def main():
         "S3"
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # ID SETS
-    # --------------------------------------------------------
+    # ========================================================
+
+    print("\nBuilding ID sets...")
 
     s2_entity_ids = set(
         s2["entity_id"]
@@ -543,49 +758,78 @@ def main():
         s3["entity_id"]
     )
 
-    # --------------------------------------------------------
+    print(
+        f"S2 unique IDs: "
+        f"{len(s2_entity_ids):,}"
+    )
+
+    print(
+        f"S3 unique IDs: "
+        f"{len(s3_entity_ids):,}"
+    )
+
+
+    # ========================================================
     # COMBINED SOURCE
-    # --------------------------------------------------------
+    # ========================================================
+
+    print(
+        "\nCombining S2 + S3..."
+    )
 
     combined = pd.concat(
         [
-            s2[[
-                "entity_id",
-                "normalized_name",
-                "tokens"
-            ]],
-            s3[[
-                "entity_id",
-                "normalized_name",
-                "tokens"
-            ]]
+            s2[
+                [
+                    "entity_id",
+                    "normalized_name",
+                    "tokens"
+                ]
+            ],
+            s3[
+                [
+                    "entity_id",
+                    "normalized_name",
+                    "tokens"
+                ]
+            ]
         ],
         ignore_index=True
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # TOKEN FREQUENCY
-    # --------------------------------------------------------
+    # ========================================================
 
-    print("\nBuilding token frequency index...")
+    print(
+        "\nBuilding token frequency index..."
+    )
 
-    TOKEN_FREQ_COMBINED = (
-        build_token_frequency(combined)
+    token_frequency = (
+        build_token_frequency(
+            combined
+        )
     )
 
     print(
         f"Unique tokens: "
-        f"{len(TOKEN_FREQ_COMBINED):,}"
+        f"{len(token_frequency):,}"
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # EXACT NAME INDEX
-    # --------------------------------------------------------
+    # ========================================================
 
-    print("\nBuilding exact-name index...")
+    print(
+        "\nBuilding exact-name index..."
+    )
 
-    exact_index = build_exact_name_index(
-        combined
+    exact_index = (
+        build_exact_name_index(
+            combined
+        )
     )
 
     print(
@@ -593,18 +837,21 @@ def main():
         f"{len(exact_index):,}"
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # TOKEN INDEX — PASS 1
-    # --------------------------------------------------------
+    # ========================================================
 
     print(
         "\nBuilding Pass 1 token index..."
     )
 
-    token_index_pass1 = build_token_index(
-        combined,
-        TOKEN_FREQ_COMBINED,
-        PASS1_MAX_TOKEN_FREQUENCY
+    token_index_pass1 = (
+        build_token_index(
+            combined,
+            token_frequency,
+            PASS1_MAX_TOKEN_FREQUENCY
+        )
     )
 
     print(
@@ -612,18 +859,21 @@ def main():
         f"{len(token_index_pass1):,}"
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # TOKEN INDEX — PASS 2
-    # --------------------------------------------------------
+    # ========================================================
 
     print(
         "\nBuilding Pass 2 token index..."
     )
 
-    token_index_pass2 = build_token_index(
-        combined,
-        TOKEN_FREQ_COMBINED,
-        PASS2_MAX_TOKEN_FREQUENCY
+    token_index_pass2 = (
+        build_token_index(
+            combined,
+            token_frequency,
+            PASS2_MAX_TOKEN_FREQUENCY
+        )
     )
 
     print(
@@ -631,26 +881,31 @@ def main():
         f"{len(token_index_pass2):,}"
     )
 
-    # --------------------------------------------------------
-    # GENERATION
-    # --------------------------------------------------------
 
-    print("\nGenerating candidate pairs...")
+    # ========================================================
+    # GENERATION
+    # ========================================================
+
+    print(
+        "\nGenerating candidate pairs..."
+    )
 
     internal_first_write = True
+
     official_first_write = True
 
     total_pairs = 0
-    s1_with_candidates = 0
-    max_candidates = 0
 
-    candidate_counts = []
+    s1_with_candidates = 0
+
+    max_candidates = 0
 
     generation_start = time.time()
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # PROCESS S1 IN CHUNKS
-    # --------------------------------------------------------
+    # ========================================================
 
     for chunk_start in range(
         0,
@@ -668,7 +923,13 @@ def main():
         ]
 
         internal_rows = []
+
         official_rows = []
+
+
+        # ====================================================
+        # PROCESS EACH S1 ROW
+        # ====================================================
 
         for row in chunk.itertuples(
             index=False
@@ -676,44 +937,50 @@ def main():
 
             candidates_s2, candidates_s3 = (
                 generate_for_s1(
-                    row,
-                    exact_index,
-                    token_index_pass1,
-                    token_index_pass2,
-                    s2["entity_id"],
-                    s3["entity_id"],
-                    s2_entity_ids,
-                    s3_entity_ids
+                    s1_row=row,
+                    exact_index=exact_index,
+                    token_index_pass1=token_index_pass1,
+                    token_index_pass2=token_index_pass2,
+                    token_frequency=token_frequency,
+                    s2_entity_ids=s2_entity_ids,
+                    s3_entity_ids=s3_entity_ids
                 )
             )
+
+
+            # =================================================
+            # UNION S2 + S3 CANDIDATES
+            # =================================================
 
             all_candidates = (
                 candidates_s2 |
                 candidates_s3
             )
 
+
             candidate_count = len(
                 all_candidates
             )
 
-            candidate_counts.append(
+            total_pairs += (
                 candidate_count
             )
 
-            total_pairs += candidate_count
 
             if candidate_count > 0:
 
                 s1_with_candidates += 1
+
 
             max_candidates = max(
                 max_candidates,
                 candidate_count
             )
 
-            # ------------------------------------------------
+
+            # =================================================
             # INTERNAL FORMAT
-            # ------------------------------------------------
+            # =================================================
 
             for entity_id in sorted(
                 candidates_s2
@@ -727,6 +994,7 @@ def main():
                     )
                 )
 
+
             for entity_id in sorted(
                 candidates_s3
             ):
@@ -739,9 +1007,10 @@ def main():
                     )
                 )
 
-            # ------------------------------------------------
+
+            # =================================================
             # OFFICIAL FORMAT
-            # ------------------------------------------------
+            # =================================================
 
             if all_candidates:
 
@@ -758,9 +1027,10 @@ def main():
                     )
                 )
 
-        # ----------------------------------------------------
+
+        # ====================================================
         # WRITE INTERNAL OUTPUT
-        # ----------------------------------------------------
+        # ====================================================
 
         if internal_rows:
 
@@ -777,15 +1047,20 @@ def main():
                 INTERNAL_OUTPUT,
                 sep="\t",
                 index=False,
-                mode="w" if internal_first_write else "a",
+                mode=(
+                    "w"
+                    if internal_first_write
+                    else "a"
+                ),
                 header=internal_first_write
             )
 
             internal_first_write = False
 
-        # ----------------------------------------------------
+
+        # ====================================================
         # WRITE OFFICIAL OUTPUT
-        # ----------------------------------------------------
+        # ====================================================
 
         if official_rows:
 
@@ -801,38 +1076,72 @@ def main():
                 OFFICIAL_OUTPUT,
                 sep="\t",
                 index=False,
-                mode="w" if official_first_write else "a",
+                mode=(
+                    "w"
+                    if official_first_write
+                    else "a"
+                ),
                 header=official_first_write
             )
 
             official_first_write = False
 
-        elapsed = time.time() - generation_start
+
+        # ====================================================
+        # PROGRESS
+        # ====================================================
+
+        elapsed = (
+            time.time()
+            - generation_start
+        )
 
         rate = (
-            (chunk_end) / elapsed
+            chunk_end / elapsed
             if elapsed > 0
             else 0
         )
 
-        print(
-            f"Processed "
-            f"{chunk_end:,}/{len(s1):,} "
-            f"S1 rows | "
-            f"Pairs: {total_pairs:,} | "
-            f"Rate: {rate:.2f} S1/sec"
+        remaining = (
+            len(s1)
+            - chunk_end
         )
 
-    # --------------------------------------------------------
+        eta_seconds = (
+            remaining / rate
+            if rate > 0
+            else 0
+        )
+
+        eta_hours = (
+            eta_seconds / 3600
+        )
+
+        print(
+            f"Processed "
+            f"{chunk_end:,}/"
+            f"{len(s1):,} S1 rows | "
+            f"Pairs: "
+            f"{total_pairs:,} | "
+            f"Rate: "
+            f"{rate:.2f} S1/sec | "
+            f"ETA: "
+            f"{eta_hours:.2f} hrs"
+        )
+
+
+    # ========================================================
     # FINAL STATISTICS
-    # --------------------------------------------------------
+    # ========================================================
 
     generation_time = (
-        time.time() - generation_start
+        time.time()
+        - generation_start
     )
 
     total_time = (
-        time.time() - start_time
+        time.time()
+        - start_time
     )
 
     average_candidates = (
@@ -841,23 +1150,56 @@ def main():
         else 0
     )
 
+
+    # ========================================================
+    # OUTPUT SIZES
+    # ========================================================
+
     internal_size_gb = (
-        os.path.getsize(INTERNAL_OUTPUT)
+
+        os.path.getsize(
+            INTERNAL_OUTPUT
+        )
+
         / (1024 ** 3)
-        if os.path.exists(INTERNAL_OUTPUT)
+
+        if os.path.exists(
+            INTERNAL_OUTPUT
+        )
+
         else 0
     )
+
 
     official_size_gb = (
-        os.path.getsize(OFFICIAL_OUTPUT)
+
+        os.path.getsize(
+            OFFICIAL_OUTPUT
+        )
+
         / (1024 ** 3)
-        if os.path.exists(OFFICIAL_OUTPUT)
+
+        if os.path.exists(
+            OFFICIAL_OUTPUT
+        )
+
         else 0
     )
 
+
+    # ========================================================
+    # FINAL RESULTS
+    # ========================================================
+
     print("\n")
+
     print("=" * 70)
-    print("FINAL CANDIDATE GENERATION RESULTS")
+
+    print(
+        "FINAL TEST CANDIDATE "
+        "GENERATION RESULTS"
+    )
+
     print("=" * 70)
 
     print(
@@ -868,6 +1210,23 @@ def main():
     print(
         f"S1 with candidates     : "
         f"{s1_with_candidates:,}"
+    )
+
+    print(
+        f"S1 without candidates  : "
+        f"{len(s1) - s1_with_candidates:,}"
+    )
+
+    if len(s1) > 0:
+        s1_coverage = (
+            s1_with_candidates / len(s1)
+        ) * 100
+    else:
+        s1_coverage = 0.0
+
+    print(
+        f"S1 coverage            : "
+        f"{s1_coverage:.4f}%"
     )
 
     print(
@@ -908,20 +1267,35 @@ def main():
     print(
         f"Processing rate        : "
         f"{len(s1) / generation_time:.2f} S1/sec"
+        if generation_time > 0
+        else "Processing rate        : 0"
     )
 
-    print("\nOutput files:")
+
+    # ========================================================
+    # OUTPUT FILES
+    # ========================================================
 
     print(
-        f"  Internal : {INTERNAL_OUTPUT}"
+        "\nOutput files:"
     )
 
     print(
-        f"  Official : {OFFICIAL_OUTPUT}"
+        f"  Internal : "
+        f"{INTERNAL_OUTPUT}"
+    )
+
+    print(
+        f"  Official : "
+        f"{OFFICIAL_OUTPUT}"
     )
 
     print("=" * 70)
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()

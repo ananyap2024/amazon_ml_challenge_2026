@@ -2,6 +2,7 @@ import os
 import re
 import time
 from collections import defaultdict
+import gzip
 
 import pandas as pd
 
@@ -33,7 +34,7 @@ OUTPUT_DIR = os.path.join(
 # TRAINING PILOT
 # ------------------------------------------------------------
 
-S1_LIMIT = 50_000
+S1_LIMIT = None
 
 # ------------------------------------------------------------
 # FROZEN BLOCKING STRATEGY
@@ -44,7 +45,7 @@ S1_LIMIT = 50_000
 #
 # Pass 2:
 #   2 distinctive tokens
-#   max frequency = 7,500
+#   max frequency = 12,500
 #
 # Exact normalized name is also included.
 # ------------------------------------------------------------
@@ -82,7 +83,7 @@ S3_PATH = os.path.join(
 
 OUTPUT_PATH = os.path.join(
     OUTPUT_DIR,
-    "training_candidate_pairs_internal.tsv"
+    "training_candidate_pairs_internal.tsv.gz"
 )
 
 
@@ -440,9 +441,14 @@ def main():
 
     print("\nConfiguration:")
 
+    if S1_LIMIT is None:
+        s1_limit_display = "ALL"
+    else:
+        s1_limit_display = f"{S1_LIMIT:,}"
+
     print(
         f"  S1 limit                 : "
-        f"{S1_LIMIT:,}"
+        f"{s1_limit_display}"
     )
 
     print(
@@ -510,16 +516,26 @@ def main():
     # LIMIT S1
     # ========================================================
 
-    s1_raw = (
-        s1_raw
-        .head(S1_LIMIT)
-        .copy()
-    )
+    if S1_LIMIT is not None:
+        s1_raw = (
+            s1_raw
+            .head(S1_LIMIT)
+            .copy()
+        )
 
-    print(
-        f"\nS1 rows selected for pilot: "
-        f"{len(s1_raw):,}"
-    )
+        print(
+            f"\nS1 rows selected for pilot: "
+            f"{len(s1_raw):,}"
+        )
+
+    else:
+
+        s1_raw = s1_raw.copy()
+
+        print(
+            f"\nFull S1 dataset selected: "
+            f"{len(s1_raw):,} rows"
+        )
 
     # ========================================================
     # PREPARE
@@ -771,34 +787,21 @@ def main():
                 ]
             )
 
-            output_df.to_csv(
+            with gzip.open(
                 OUTPUT_PATH,
-                sep="\t",
-                index=False,
-                mode="w" if first_write else "a",
-                header=first_write
-            )
+                "at",
+                encoding="utf-8",
+                newline=""
+            ) as output_file:
+
+                output_df.to_csv(
+                    output_file,
+                    sep="\t",
+                    index=False,
+                    header=first_write
+                )
 
             first_write = False
-
-        elapsed = (
-            time.time()
-            - generation_start
-        )
-
-        rate = (
-            chunk_end / elapsed
-            if elapsed > 0
-            else 0
-        )
-
-        print(
-            f"Processed "
-            f"{chunk_end:,}/{len(s1):,} "
-            f"S1 rows | "
-            f"Pairs: {total_pairs:,} | "
-            f"Rate: {rate:.2f} S1/sec"
-        )
 
     # ========================================================
     # FINAL STATISTICS
