@@ -3,6 +3,7 @@
 
 # Amazon ML Challenge dataset
 dataset/
+dataset.zip
 
 # Python
 __pycache__/
