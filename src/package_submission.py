@@ -137,6 +137,25 @@ def build_submission_zip(
         print(f"  + {code_prefix}/requirements.txt")
         zf.write(req_file, arcname=f"{code_prefix}/requirements.txt")
 
+        # Model artifacts required for reproducible inference
+        models_dir = repo_root / "code" / "business_entity_resolution" / "models"
+        required_models = [
+            "matching_model.pkl",
+            "tfidf_vectorizers.pkl",
+        ]
+
+        for model_name in required_models:
+            model_file = models_dir / model_name
+
+            if not model_file.is_file():
+                raise FileNotFoundError(
+                    f"Missing required model artifact: {model_file}"
+                )
+
+            arc_name = f"{code_prefix}/models/{model_name}"
+            print(f"  + {arc_name}")
+            zf.write(model_file, arcname=arc_name)
+
         # Source code files (excluding __pycache__ and scratch)
         src_dir = repo_root / "src"
         if src_dir.is_dir():
@@ -190,6 +209,8 @@ def verify_submission_zip(zip_path: Path) -> List[str]:
             "Documentation_template.md",
             "code/business_entity_resolution/README.md",
             "code/business_entity_resolution/requirements.txt",
+            "code/business_entity_resolution/models/matching_model.pkl",
+            "code/business_entity_resolution/models/tfidf_vectorizers.pkl",
         ]
         for req in required_entries:
             if req not in namelist:
