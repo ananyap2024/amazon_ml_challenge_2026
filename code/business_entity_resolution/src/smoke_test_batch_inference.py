@@ -29,6 +29,14 @@ TRAIN_SOURCE1 = _WORKSPACE_ROOT / "student_resource" / "dataset" / "train" / "tr
 TRAIN_SOURCE2 = _WORKSPACE_ROOT / "student_resource" / "dataset" / "train" / "train_source2.tsv"
 TRAIN_SOURCE3 = _WORKSPACE_ROOT / "student_resource" / "dataset" / "train" / "train_source3.tsv"
 
+# Fallback to repository dataset directory if student_resource is not present
+if not SAMPLE_PAIRS_SOURCE.is_file():
+    SAMPLE_PAIRS_SOURCE = _REPO_ROOT / "dataset" / "train" / "train_candidate_pairs_sample1000.tsv"
+if not TRAIN_SOURCE1.is_file():
+    TRAIN_SOURCE1 = _REPO_ROOT / "dataset" / "train" / "train_source1.tsv"
+    TRAIN_SOURCE2 = _REPO_ROOT / "dataset" / "train" / "train_source2.tsv"
+    TRAIN_SOURCE3 = _REPO_ROOT / "dataset" / "train" / "train_source3.tsv"
+
 N_SAMPLE_ROWS = 25
 TEST_CHUNK_SIZE = 10
 TEST_THRESHOLD = 0.60
