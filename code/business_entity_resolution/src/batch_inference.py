@@ -115,6 +115,34 @@ def validate_pair_format(s1_id, cand_id, source):
     return ""
 
 
+def write_checkpoint(state_path, stats, output_offset):
+    """Save an atomic checkpoint of streaming inference progress."""
+    state = {
+        "total_pairs_read": stats["total_pairs_read"],
+        "total_pairs_scored": stats["total_pairs_scored"],
+        "total_pairs_skipped": stats["total_pairs_skipped"],
+        "predicted_matches_count": stats["predicted_matches_count"],
+        "chunks_processed": stats["chunks_processed"],
+        "output_offset": output_offset,
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    tmp = Path(state_path).with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, state_path)
+
+
+def read_checkpoint(state_path):
+    """Read existing checkpoint state if present."""
+    state_path = Path(state_path)
+    if not state_path.is_file():
+        return None
+    with open(state_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def run_batch_inference(
     pairs_path,
     source1_path,
@@ -128,6 +156,8 @@ def run_batch_inference(
     max_pairs=None,
     summary_path=None,
     log_interval=10,
+    resume=False,
+    fresh=False,
 ):
     """Score candidate pairs in streaming chunks and write predictions.
 
@@ -173,6 +203,22 @@ def run_batch_inference(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_output_path = output_path.with_suffix(".tsv.tmp")
+    state_path = output_path.with_suffix(".state.json")
+
+    if fresh and resume:
+        raise ValueError("Use either --fresh or --resume, not both.")
+
+    if fresh:
+        if temp_output_path.exists():
+            temp_output_path.unlink()
+        if state_path.exists():
+            state_path.unlink()
+        if output_path.exists():
+            output_path.unlink()
+
+    checkpoint = read_checkpoint(state_path) if resume else None
+    if resume and checkpoint is None:
+        raise RuntimeError(f"--resume requested but no checkpoint state exists at: {state_path}")
 
     print("=" * 70)
     print("PRODUCTION BATCH INFERENCE DRIVER")
@@ -186,6 +232,10 @@ def run_batch_inference(
     print(f"Threshold       : {threshold if threshold is not None else 'None (outputting probabilities only)'}")
     if max_pairs is not None:
         print(f"Max pairs cap   : {max_pairs:,}")
+    if resume:
+        print(f"Mode            : RESUME from checkpoint ({checkpoint.get('chunks_processed', 0):,} chunks done)")
+    elif fresh:
+        print(f"Mode            : FRESH start (cleared previous outputs/checkpoints)")
 
     # 1. Load model and vectorizers
     print("\n[1/3] Loading production model and TF-IDF vectorizers...")
@@ -245,13 +295,31 @@ def run_batch_inference(
 
     t_inference_start = time.time()
 
-    with open(temp_output_path, "w", encoding="utf-8") as out_f:
-        # Write header
-        out_f.write("\t".join(output_columns) + "\n")
+    if checkpoint:
+        resume_offset = checkpoint.get("output_offset", 0)
+        stats["total_pairs_read"] = checkpoint.get("total_pairs_read", 0)
+        stats["total_pairs_scored"] = checkpoint.get("total_pairs_scored", 0)
+        stats["total_pairs_skipped"] = checkpoint.get("total_pairs_skipped", 0)
+        stats["predicted_matches_count"] = checkpoint.get("predicted_matches_count", 0 if threshold is not None else None)
+        stats["chunks_processed"] = checkpoint.get("chunks_processed", 0)
 
+        out_f = open(temp_output_path, "r+b")
+        out_f.truncate(resume_offset)
+        out_f.seek(resume_offset)
+        print(f"      Resuming from chunk {stats['chunks_processed']:,} ({stats['total_pairs_read']:,} pairs read) at byte offset {resume_offset:,}...")
+    else:
+        out_f = open(temp_output_path, "w+b")
+        out_f.write(("\t".join(output_columns) + "\n").encode("utf-8"))
+        out_f.flush()
+        os.fsync(out_f.fileno())
+
+    try:
         reader = pd.read_csv(pairs_path, sep="\t", chunksize=chunk_size)
 
         for chunk_idx, chunk in enumerate(reader):
+            if resume and chunk_idx < stats["chunks_processed"]:
+                continue
+
             if max_pairs is not None and stats["total_pairs_read"] >= max_pairs:
                 break
 
@@ -313,14 +381,19 @@ def run_batch_inference(
                     stats["predicted_matches_count"] += int(predictions.sum())
 
                     for (s1_id, cand_id, src), prob, pred in zip(valid_rows, probabilities, predictions):
-                        out_f.write(f"{s1_id}\t{cand_id}\t{src}\t{prob:.6f}\t{pred}\n")
+                        out_f.write(f"{s1_id}\t{cand_id}\t{src}\t{prob:.6f}\t{pred}\n".encode("utf-8"))
                 else:
                     for (s1_id, cand_id, src), prob in zip(valid_rows, probabilities):
-                        out_f.write(f"{s1_id}\t{cand_id}\t{src}\t{prob:.6f}\n")
+                        out_f.write(f"{s1_id}\t{cand_id}\t{src}\t{prob:.6f}\n".encode("utf-8"))
 
                 stats["total_pairs_scored"] += len(batch)
 
             stats["chunks_processed"] += 1
+
+            # Commit chunk progress
+            out_f.flush()
+            os.fsync(out_f.fileno())
+            write_checkpoint(state_path, stats, out_f.tell())
 
             if (chunk_idx + 1) % log_interval == 0 or (max_pairs and stats["total_pairs_read"] >= max_pairs):
                 elapsed = time.time() - t_inference_start
@@ -329,10 +402,14 @@ def run_batch_inference(
                       f"Pairs read: {stats['total_pairs_read']:9,d} | "
                       f"Scored: {stats['total_pairs_scored']:9,d} | "
                       f"Speed: {rate:6.1f} pairs/s")
+    finally:
+        out_f.close()
 
     # Atomic rename from temporary to target file
     if temp_output_path.exists():
         os.replace(temp_output_path, output_path)
+    if state_path.exists():
+        state_path.unlink()
 
     total_time = time.time() - start_time
     stats["total_seconds"] = total_time
@@ -398,6 +475,8 @@ Examples:
     parser.add_argument("--max-pairs", type=int, default=None, help="Optional maximum number of candidate pairs to process (for testing)")
     parser.add_argument("--summary", default=None, help="Optional path to save JSON run summary")
     parser.add_argument("--log-interval", type=int, default=10, help="Print progress log every N chunks (default: 10)")
+    parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint state.")
+    parser.add_argument("--fresh", action="store_true", help="Clear existing partial output and checkpoint before running.")
 
     return parser.parse_args()
 
@@ -417,4 +496,6 @@ if __name__ == "__main__":
         max_pairs=args.max_pairs,
         summary_path=args.summary,
         log_interval=args.log_interval,
+        resume=args.resume,
+        fresh=args.fresh,
     )

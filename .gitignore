@@ -12,3 +12,5 @@ venv/
 
 # Generated outputs
 output/
+
+pilot/
