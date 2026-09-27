@@ -17,5 +17,7 @@ venv/
 # Generated outputs
 output/
 
+pilot/
+
 # Local files
 .env
