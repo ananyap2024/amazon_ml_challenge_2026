@@ -34,10 +34,24 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
 
+import sys
+
 try:
     import joblib
 except ImportError:
     joblib = None
+
+# Dynamically link Member 2 production package
+_PROD_SRC = Path(__file__).resolve().parent.parent / "code" / "business_entity_resolution" / "src"
+if _PROD_SRC.is_dir() and str(_PROD_SRC) not in sys.path:
+    sys.path.insert(0, str(_PROD_SRC))
+
+try:
+    import inference as prod_inference
+    import features_13 as prod_features_13
+    MEMBER2_PROD_AVAILABLE = True
+except ImportError:
+    MEMBER2_PROD_AVAILABLE = False
 
 from preprocessing import (
     normalize_address,
@@ -491,25 +505,67 @@ class Member2XGBoost13FeatureAdapter:
 
         n_rows = len(candidate_batch)
 
-        # Compute 13-feature matrix
-        feature_df = compute_13_features_for_batch(
-            candidate_batch=candidate_batch,
-            catalog=self.records_catalog,
-            name_vectorizer=self.name_vectorizer,
-            address_vectorizer=self.address_vectorizer,
-        )
+        required_cols = {"source1_entity_id", "candidate_entity_id"}
+        missing = required_cols - set(candidate_batch.columns)
+        if missing:
+            raise ValueError(f"candidate_batch missing required columns: {missing}")
 
-        # Predict match probabilities
-        if not hasattr(self.model, "predict_proba"):
-            raise TypeError("Model artifact does not implement predict_proba.")
-
-        raw_probs = self.model.predict_proba(feature_df)
-        if hasattr(raw_probs, "ndim") and raw_probs.ndim == 2:
-            probs = raw_probs[:, 1].tolist()
-        elif hasattr(raw_probs, "ndim") and raw_probs.ndim == 1:
-            probs = raw_probs.tolist()
+        s1_ids = candidate_batch["source1_entity_id"].astype(str).tolist()
+        cand_ids = candidate_batch["candidate_entity_id"].astype(str).tolist()
+        if "source" in candidate_batch.columns:
+            sources = candidate_batch["source"].astype(str).tolist()
         else:
-            probs = list(raw_probs)
+            sources = ["source2" if cid.startswith("S2-") else "source3" for cid in cand_ids]
+
+        if MEMBER2_PROD_AVAILABLE:
+            candidate_batch_dicts = []
+            for s1_id, cand_id, src in zip(s1_ids, cand_ids, sources):
+                s1_rec = self.records_catalog.get_record("source1", s1_id)
+                c_rec = self.records_catalog.get_record(src, cand_id)
+                candidate_batch_dicts.append({
+                    "source1_entity_id": s1_id,
+                    "candidate_entity_id": cand_id,
+                    "source": src,
+                    "source1_record": {
+                        "entity_id": s1_id,
+                        "business_name": s1_rec[0],
+                        "business_address": s1_rec[1],
+                        "country": s1_rec[2],
+                    },
+                    "candidate_record": {
+                        "entity_id": cand_id,
+                        "business_name": c_rec[0],
+                        "business_address": c_rec[1],
+                        "country": c_rec[2],
+                    },
+                })
+            probs_arr = prod_inference.predict_batch(
+                candidate_batch=candidate_batch_dicts,
+                model=self.model,
+                name_vectorizer=self.name_vectorizer,
+                address_vectorizer=self.address_vectorizer,
+            )
+            probs = probs_arr.tolist()
+        else:
+            # Fallback feature calculation
+            feature_df = compute_13_features_for_batch(
+                candidate_batch=candidate_batch,
+                catalog=self.records_catalog,
+                name_vectorizer=self.name_vectorizer,
+                address_vectorizer=self.address_vectorizer,
+            )
+
+            # Predict match probabilities
+            if not hasattr(self.model, "predict_proba"):
+                raise TypeError("Model artifact does not implement predict_proba.")
+
+            raw_probs = self.model.predict_proba(feature_df)
+            if hasattr(raw_probs, "ndim") and raw_probs.ndim == 2:
+                probs = raw_probs[:, 1].tolist()
+            elif hasattr(raw_probs, "ndim") and raw_probs.ndim == 1:
+                probs = raw_probs.tolist()
+            else:
+                probs = list(raw_probs)
 
         # Strict validation of outputs
         if len(probs) != n_rows:

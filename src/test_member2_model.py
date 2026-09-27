@@ -106,6 +106,7 @@ class TestMember2XGBoost13Model(unittest.TestCase):
                 model=self.xgb_model,
                 name_vectorizer=None,
                 address_vectorizer=self.addr_vec,
+                vectorizers_path="nonexistent_vecs.pkl",
             )
         self.assertIn("Name TF-IDF vectorizer is missing", str(ctx.exception))
 
@@ -115,6 +116,7 @@ class TestMember2XGBoost13Model(unittest.TestCase):
                 model=self.xgb_model,
                 name_vectorizer=self.name_vec,
                 address_vectorizer=None,
+                vectorizers_path="nonexistent_vecs.pkl",
             )
         self.assertIn("Address TF-IDF vectorizer is missing", str(ctx.exception))
 
